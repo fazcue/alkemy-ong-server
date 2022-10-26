@@ -7,6 +7,7 @@ const sendMail = require('../services/sendMail')
 const path = require('path');
 const { validationResult, check } = require("express-validator");
 const ejs = require('ejs')
+const aws = require('../services/aws')
 
 
 const userControllers = {
@@ -52,7 +53,8 @@ const userControllers = {
             firstName: firstName,
             lastName:lastName,
             email: email,
-            password: passHash
+            password: passHash,
+            image:"/images/default-user.jpg"
         })
         .then((newUser)=>{
             ejs.renderFile(path.resolve(__dirname, '../views/welcomeNewUser.ejs'), {newUser}, (err, welcomeHTML) => {
@@ -97,13 +99,13 @@ const userControllers = {
     //verifying through the user's email if 
     //the rolesId is administrator to show the list of all users.
     listAllUsers: async (req, res) => {
-        const { email } = req.query;   
+        /* const { email } = req.query;   
         const rolAdmin= 1; 
         const validAdmUser = await db.User.findOne({ where: { email: email, roleId:rolAdmin } });
         
         if (validAdmUser == null) {
         return res.status(500).json("Esta solicitud solo puede ser hecha por un Usuario Administrador");
-        }  
+        }   */
         const user = await db.User.findAll();
         return res.json(user);  
     },
@@ -117,40 +119,61 @@ const userControllers = {
     },
     update: async(req, res) => {
         let id = req.params.id;
-        const {firstName, lastName, email, image} = req.body
+        let imageUrl;
+        let image;
+        const {firstName, lastName, email, password, newPassword} = req.body;
+
+        if (req.files?.image) {
+            image = req.files.image
+            const imageValidation = /^$|\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(image.name)
+            if(!imageValidation) {
+                return res.status(400).json({errors: 'Imagen invalida'})
+            }
+            imageUrl = await aws.uploadFile(image.name, image.data)
+        }
+
         const oldData = await User.findOne({where: {id}})
 
+        if(!firstName && !lastName && !email && !image && !password && !newPassword) {
+            return res.status(404).json({errors: 'No se envio datos'})
+        }
+
+
         if(oldData === null) {
-            return res.status(404).json({errors: 'Not found'})
+            return res.status(404).json({errors: 'ID no encontrada'})
         }
 
         if(firstName) {
             const nameValidation = /^$|^[A-Za-z\s]+$/.test(firstName)
             if(!nameValidation) {
-                return res.status(400).json({errors: 'Invalid name'})
+                return res.status(400).json({errors: 'Nombre invalido'})
             }
         }
 
         if(lastName) {
             const nameValidation = /^$|^[A-Za-z\s]+$/.test(lastName)
             if(!nameValidation) {
-                return res.status(400).json({errors: 'Invalid surname'})
+                return res.status(400).json({errors: 'Apellido invalido'})
             }
         }
 
         if(image){
-            const imageValidation = /^$|\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(image)
-            if(!imageValidation) {
-                return res.status(400).json({errors: 'Invalid image'})
-            }
+
+            
         }
+        
+        if(password && newPassword) {
+
+        }
+
+        
 
         let updatedUser = {
             id,
             firstName: firstName ? firstName : oldData.dataValues.firstName,
             lastName: lastName ? lastName : oldData.dataValues.lastName,
             email: email ? email : oldData.dataValues.email,
-            image: image ? image : oldData.dataValues.image,
+            image: image ? imageUrl : oldData.dataValues.image,
             roleId: oldData.dataValues.roleId,
             createdAt: oldData.dataValues.createdAt,
             updatedAt: new Date(),
@@ -159,8 +182,8 @@ const userControllers = {
         let token = signToken(updatedUser)
         
         User.update(updatedUser,{where:{id}})
-            .then(data => res.status(200).json(token))
-            .catch(error => res.status(503).json(error))
+            .then(data => res.status(200).json({token, user: updatedUser}))
+            .catch(error => res.status(503).json({errors: 'Base de datos no disponible'}))
     }
 };
 
